@@ -1,0 +1,184 @@
+<html>
+<head>
+<script type='text/javascript' src='coffee-script.js'></script>
+<script type='text/coffeescript'>
+# Globals
+sum = (a, b) -> a + b
+setAttrs = (el, attrs) -> (el.setAttribute(k, v) for k, v of attrs); el
+appendSVG = (svg, tag, attrs) -> svg.appendChild(setAttrs(
+  document.createElementNS('http://www.w3.org/2000/svg',tag),attrs))
+getId = (id) -> document.getElementById(id)
+TRUMP = ['AL','AK','AZ','AR','FL','GA','ID','IN','KS','KY','LA','MI','MS','MO',
+  'MT','NE','NC','ND','OH','OK','PA','SC','SD','TN','TX','UT','WV','WI','WY']
+STATES = [
+  ['AL', 9, 4863300],['AK', 3,  741894],['AZ',11, 6931071],['AR', 6, 2988248]
+  ['CA',55,39250017],['CO', 9, 5540545],['CT', 7, 3576452],['DE', 3,  952065]
+  ['DC', 3,  681170],['FL',29,20612439],['GA',16,10310371],['HI', 4, 1428557]
+  ['ID', 4, 1683140],['IL',20,12801539],['IN',11, 6633053],['IA', 6, 3134693]
+  ['KS', 6, 2907289],['KY', 8, 4436974],['LA', 8, 4681666],['ME', 4, 1331479]
+  ['MD',10, 6016447],['MA',11, 6811779],['MI',16, 9928300],['MN',10, 5519952]
+  ['MS', 6, 2988726],['MO',10, 6093000],['MT', 3, 1042520],['NE', 5, 1907116]
+  ['NV', 6, 2940058],['NH', 4, 1334795],['NJ',14, 8944469],['NM', 5, 2081015]
+  ['NY',29,19745289],['NC',15,10146788],['ND', 3,  757952],['OH',18,11614373]
+  ['OK', 7, 3923561],['OR', 7, 4093465],['PA',20,12784227],['RI', 4, 1056426]
+  ['SC', 9, 4961119],['SD', 3,  865454],['TN',11, 6651194],['TX',38,27862596]
+  ['UT', 6, 3051217],['VT', 3,  624594],['VA',13, 8411808],['WA',12, 7288000]
+  ['WV', 5, 1831102],['WI',10, 5778708],['WY', 3,  585501]
+]
+STATES = (-> ({n: s[0], v: s[1], p: s[2]} for s in STATES))()
+sort_alpha = (a,b) -> Math.pow(-1, a.n < b.n)
+sort_ratio = (a,b) -> Math.pow(-1, a.p / a.v < b.p / a.v)
+MAX_VOTES = (-> (s.v for s in STATES).reduce(sum))()
+MAX_POP   = (-> (s.p for s in STATES).reduce(sum))()
+INFINITY  = Number.MAX_SAFE_INTEGER / 2
+memo = []
+settings = {trim: false, sort: false, paths: false, optpath: false}
+
+window.onload = () ->
+  setAttrs(getId('input'), {min: 0, max: MAX_VOTES, value: 71})
+  for id in ['input','vote_num','trim','sort','paths','optpath']
+    getId(id).addEventListener('change', (e) -> redraw(e.target.id))
+  redraw('input')
+  return
+
+# Drawing functions
+redraw = (id) ->
+  settings[k] = getId(k).checked for k of settings
+  votes = Math.ceil(parseFloat(
+    getId(if id is 'input' then 'input' else 'vote_num').value))
+  getId('input').value = votes
+  getId('vote_num').value = votes
+  STATES.sort(if settings.sort then sort_ratio else sort_alpha)
+  STATES.reduce(((sum, s, i) -> STATES[i].sum = sum + s.v; return sum + s.v), 0)
+  div = getId('svgs')
+  div.removeChild(div.firstChild) while div.firstChild
+  svgs = []
+  for i in [0..2]
+    svgs[i] = appendSVG(div, 'svg', {
+      xmlns: 'http://www.w3.org/2000/svg'
+      width: '95%', viewBox: "-2 0 #{MAX_VOTES + 3} #{STATES.length + 2}"})
+    setAttrs(svgs[i], {width: '', height: '80%'}) if i is 0
+    svgs[i].addEventListener('click', (e) ->
+      svgs[i] = e.target
+      if svgs[i].hasAttribute('height')
+        setAttrs(svgs[i], {width: '95%'}).removeAttribute('height')
+      else
+        setAttrs(svgs[i], {height: '80%'}).removeAttribute('width')
+    )
+    svgs[i].appendChild(getId('styles').cloneNode(1))
+  appendSVG(svgs[2], 'line', {
+    x1: votes, y1: 0, x2: votes, y2: STATES.length, class: 'red'})
+  appendSVG(svgs[2], 'line', {
+    x1: 0, y1: STATES.length, x2: MAX_VOTES, y2: 0, class: 'blue'})
+  memo = ({} for s in STATES)
+  opts = []
+  lin = (q) -> (1 - opts[q].min/MAX_POP) * STATES.length
+  weird = []
+  for vi in [0..MAX_VOTES]
+    opts[vi] = minpop(STATES.length - 1, vi)
+    draw_opt(svgs[1], opts[vi], '')
+    if vi isnt 0
+      appendSVG(svgs[2], 'line', {
+        y1: lin(vi - 1), x1: vi - 1, y2: lin(vi), x2: vi, class: 'red'})
+      if lin(vi - 1) < lin(vi)
+        appendSVG(svgs[2], 'circle', {cx: vi, cy: lin(vi), r: 0.5})
+        weird.push(vi)
+  getId('weird').innerHTML = weird.reduce((a,b) -> "#{a}, #{b}")
+  memo = ({} for s in STATES)
+  opt = minpop(STATES.length - 1, votes, svgs[0])
+  draw_opt(svgs[i], opt, 'red') for i in [0,1]
+  min = (opt.min / 2 / 1000000).toFixed(2)
+  exp = (MAX_POP * votes / MAX_VOTES / 2 / 1000000).toFixed(2)
+  getId('min_pop').innerHTML = "#{min}M"
+  getId('exp_pop').innerHTML = "#{exp}M"
+  getId('pop_diff').innerHTML = "#{(min - exp).toFixed(2)}M"
+  getId('per_diff').innerHTML = "#{((min - exp) / exp * 100).toFixed(2)}%"
+  getId('per_pop').innerHTML = "#{(opt.min / MAX_POP / 2 * 100).toFixed(2)}%"
+  state_list = (s.n for s in opt.set).reduce(((a, b) -> a.concat(
+    "<span style='color:#{if b in TRUMP then 'red' else 'blue'};'>#{b}\
+    </span>, ")), "")
+  getId('states').innerHTML = state_list
+  return
+
+draw_opt = (svg, opt, cls) ->
+  j = v = 0
+  for s, i in STATES when settings.optpath
+    old = v
+    if opt.set[j]?.n is s.n then v = old + opt.set[j++].v
+    appendSVG(svg, 'line', {class: cls, y1: i, x1: old, y2: i + 1, x2: v})
+  return
+
+draw_label = (i, v, svg, color, s) ->
+  appendSVG(svg, 'circle', {
+      cx: v, cy: i + 1, r: 0.3, style: "fill: #{color}; opacity: 0.5;"})
+    .addEventListener('click', (e) ->
+      group = appendSVG(svg, 'g')
+      appendSVG(group, 'rect', {
+        x: v, y: i+1, width: 30, height: 3, fill: 'white'
+        stroke: 'black', 'stroke-width': 0.1})
+      appendSVG(group, 'text', {x: v + 1, y: i + 3, 'font-size': 2})
+        .innerHTML = "State #{i}" + (if s? then ": {#{s.n}: #{s.v}}" else "") +
+          ", Votes: #{v}"
+      appendSVG(group, 'circle', {
+        cx: v, cy: i + 1, r: 0.3, style: 'fill: black; opacity: 1;'})
+      group.addEventListener('click', (e) ->
+        e.target.parentNode.parentNode.removeChild(e.target.parentNode)))
+
+draw_subproblem = (i, v, svg, skipped, s) ->
+  reachable = memo[i][v].min < INFINITY and settings.paths
+  appendSVG(svg, 'line', {
+    y1: i + 1, x1: v, y2: i, x2: v,
+    class: if ( skipped and reachable) then 'blue' else ''})
+  appendSVG(svg, 'line', {
+    y1: i + 1, x1: v, y2: i, x2: v - s.v,
+    class: if (!skipped and reachable) then 'blue' else ''})
+  draw_label(i, v, svg, 'red', s)
+
+# Dynamic Program
+minpop = (i, v, svg = null) ->
+  s = STATES[i]
+  if v == 0
+    draw_label(i, v, svg, 'blue', s) if svg
+    return {min: 0, set: []}
+  if v < 0 or i < 0 or (s.sum < v and settings.trim)
+    draw_label(i, v, svg, 'black', s) if svg
+    return {min: INFINITY, set: []}
+  if memo[i][v] is undefined
+    skip = minpop(i - 1, v, svg)
+    temp = minpop(i - 1, v - s.v, svg)
+    take = {min: temp.min + s.p, set: temp.set.concat(s)}
+    skipped = skip.min <= take.min
+    memo[i][v] = if skipped then skip else take
+    draw_subproblem(i, v, svg, skipped, s) if svg
+  return memo[i][v]
+</script>
+</head>
+<body>
+<!-- Interface -->
+<style type='text/css' id='styles'>
+  svg        {border: 1pt solid black; padding: 2%; margin: 5px;}
+  line       {stroke-width: 0.03; stroke: gray;                    
+    stroke-linecap: round; pointer-events: none;}
+  line.red   {stroke-width: 0.2; stroke: red;}
+  line.blue  {stroke-width: 0.1; stroke: blue;}
+  circle     {fill: red; opacity: 0.5;}
+</style>
+<table width=90%><tr>
+<td><b>Electoral Vote Target:</b> 
+<input type='text' id='vote_num' style='width: 50;'></input></td>
+<td><b>   Min Pop:</b> <span id='min_pop' ></span></td>
+<td><b>   Exp Pop:</b> <span id='exp_pop' ></span></td>
+<td><b>  Pop Diff:</b> <span id='pop_diff'></span></td>
+<td><b>    % Diff:</b> <span id='per_diff'></span></td>
+<td><b>% Pop Vote:</b> <span id='per_pop'></span></td>
+</tr></table>
+<b>Opt States:</b> <span id='states'></span><br>
+<b>Weird Votes:</b> <span id='weird'></span><br>
+<input type='checkbox' id='sort'>Sort</input>
+<input type='checkbox' id='trim'>Trim</input>
+<input type='checkbox' id='paths'>Paths</input>
+<input type='checkbox' id='optpath'>Opt</input><br>
+<input id='input' type='range' style='width: 100%;'></input><br>
+<div id='svgs'></div>
+</body>
+</html>
